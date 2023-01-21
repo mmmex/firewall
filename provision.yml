@@ -1,0 +1,172 @@
+# code: language=ansible
+---
+- name: Setup centralRouter
+  hosts: centralRouter
+  become: true
+  ignore_errors: true
+  tasks:
+  - name: Set ip forwarding to 1
+    ansible.builtin.sysctl:
+      name: net.ipv4.ip_forward
+      value: '1'
+      sysctl_set: yes
+      state: present
+      reload: yes
+  - name: Install epel-release
+    ansible.builtin.yum:
+      name: epel-release
+      state: present
+  - name: Install knock client
+    ansible.builtin.yum:
+      name: knock
+      state: present
+  - name: Setup routes and firewall nat rule
+    shell: |
+      ip route del default via 10.0.2.2
+      ip route add default via 192.168.255.1
+  - name: Iptables flush nat table
+    ansible.builtin.iptables:
+      table: nat
+      flush: yes
+  - name: Iptables setup nat rule
+    ansible.builtin.iptables:
+      table: nat
+      chain: POSTROUTING
+      destination: '!192.168.0.0/16'
+      out_interface: eth1
+      jump: MASQUERADE
+
+- name: Setup inetRouter
+  hosts: inetRouter
+  become: true
+  gather_facts: False
+  tasks:
+  - name: Set ip forwarding to 1
+    ansible.builtin.sysctl:
+      name: net.ipv4.ip_forward
+      value: '1'
+      sysctl_set: yes
+      state: present
+      reload: yes
+  - name: Iptables flush nat table
+    ansible.builtin.iptables:
+      table: nat
+      flush: yes
+  - name: Iptables setup nat rule
+    ansible.builtin.iptables:
+      table: nat
+      chain: POSTROUTING
+      destination: '!192.168.0.0/16'
+      out_interface: eth0
+      jump: MASQUERADE
+  - name: Iptables reject 22 TCP port
+    ansible.builtin.iptables:
+      chain: INPUT
+      protocol: TCP
+      destination_port: 22
+      in_interface: eth1
+      jump: REJECT
+  - name: Iptables allow RELATED,ESTABLISHED
+    ansible.builtin.iptables:
+      action: insert
+      chain: INPUT
+      ctstate:
+        - ESTABLISHED
+        - RELATED
+      jump: ACCEPT
+  - name: Install epel-release
+    ansible.builtin.yum:
+      name: epel-release
+      state: present
+  - name: Install knock-server
+    ansible.builtin.yum:
+      name: knock-server
+      update_cache: yes
+      state: present
+  - name: Setup config for /etc/knockd.conf
+    ansible.builtin.copy:
+      backup: yes
+      src: files/knockd.conf
+      dest: /etc/knockd.conf
+      owner: root
+      group: root
+      mode: '0644'
+  - name: Setup options for knockd service /etc/sysconfig/knockd
+    ansible.builtin.copy:
+      backup: yes
+      src: files/knockd
+      dest: /etc/sysconfig/knockd
+      owner: root
+      group: root
+      mode: '0644'
+  - name: Systemctl enable and start knockd
+    ansible.builtin.systemd:
+      name: knockd
+      enabled: yes
+      state: restarted
+  - name: Access password authentication sshd
+    ansible.builtin.replace:
+      path: /etc/ssh/sshd_config
+      regexp: '^PasswordAuthentication no'
+      replace: 'PasswordAuthentication yes'
+  - name: Restart sshd
+    ansible.builtin.systemd:
+      name: sshd
+      state: restarted
+
+- name: Setup inetRouter2
+  hosts: inetRouter2
+  become: true
+  gather_facts: False
+  tasks:
+  - name: Set ip forwarding to 1
+    ansible.builtin.sysctl:
+      name: net.ipv4.ip_forward
+      value: '1'
+      sysctl_set: yes
+      state: present
+      reload: yes
+  - name: Setup routes and firewall nat rule
+    shell: |
+      ip route add 192.168.0.0/28 via 192.168.254.2
+  - name: Iptables flush nat table
+    ansible.builtin.iptables:
+      table: nat
+      flush: yes
+  - name: Iptables setup nat rule
+    ansible.builtin.iptables:
+      table: nat
+      chain: POSTROUTING
+      destination: '!192.168.0.0/16'
+      out_interface: eth0
+      jump: MASQUERADE
+  - name: Iptables setup nat to nginx 192.168.0.2:80 TCP
+    ansible.builtin.iptables:
+      table: nat
+      chain: PREROUTING
+      protocol: TCP
+      destination_port: 8080
+      jump: DNAT
+      to_destination: 192.168.0.2:80
+
+- name: Setup centralServer
+  hosts: centralServer
+  become: true
+  gather_facts: False
+  ignore_errors: true
+  tasks:
+  - name: Install epel-release
+    ansible.builtin.yum:
+      name: epel-release
+      state: present
+  - name: Install nginx
+    ansible.builtin.yum:
+      name: nginx
+      state: present
+  - name: Enable and start nginx
+    ansible.builtin.systemd:
+      name: nginx
+      enabled: yes
+      state: started
+  - name: Replace default route
+    shell: ip route del default via 10.0.2.2;ip route add default via 192.168.0.1
