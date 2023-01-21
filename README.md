@@ -13,7 +13,7 @@
 
 ### Knocking port
 
-* Для запуска проекта необходимо склонировать репозиторий: `https://github.com/mmmex/firewall.git`
+* Для запуска проекта необходимо склонировать репозиторий: `git clone https://github.com/mmmex/firewall.git`
 
 * Переходим в каталог `firewall`: `cd firewall`
 
